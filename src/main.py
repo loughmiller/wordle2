@@ -1,8 +1,10 @@
-import random
+from datetime import datetime, timedelta
 import json
-from itertools import product
 import multiprocessing
+import random
+import requests
 from functools import partial
+from itertools import product
 
 # Assuming your JSON data is stored in a file named 'words.json'
 with open('wordleDictionary.json', 'r') as file:
@@ -21,6 +23,56 @@ ANSWERS = GUESSES[GUESSES.index('zymic') + 1:]
 # GUESSES = ANSWERS
 # ANSWERS = GUESSES
 # print(len(GUESSES))
+
+def fetch_previous_answers():
+    start_date = datetime(2021, 6, 19)
+    end_date = datetime.now() - timedelta(days=1) # Current date
+
+    # previous_answers = []
+    previous_answers = load_previous_answers()
+
+    # print previous answer count
+    print(f"Previous answer count: {len(previous_answers)}")
+
+    last_answer_date = datetime.strptime(previous_answers[-1]['print_date'], '%Y-%m-%d')
+
+    start_date = last_answer_date + timedelta(days=1)
+
+    # print start date
+    print(f"Start date: {start_date.strftime('%Y-%m-%d')}")
+
+    current_date = start_date
+
+    while current_date < end_date:
+        # print fetch date
+        print(f"Fetching data for {current_date.strftime('%Y-%m-%d')}")
+        previous_answers += [fetch_previous_answer(current_date)]
+        current_date += timedelta(days=1)
+
+    with open('previous_answers.json', 'w') as json_file:
+        json.dump(previous_answers, json_file)
+
+    # let's just return the ansers
+    answers = []
+    for answer in previous_answers:
+        answers.append(answer['solution'])
+
+    # print(answers)
+
+    return answers
+
+def fetch_previous_answer(date):
+    url = f"https://www.nytimes.com/svc/wordle/v2/{date.strftime('%Y-%m-%d')}.json"
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Failed to retrieve data for {date.strftime('%Y-%m-%d')}. Status code: {response.status_code}")
+        return None
+
+def load_previous_answers():
+    with open('previous_answers.json', 'r') as file:
+        return json.load(file)
 
 def filter_words(words, guess, feedback):
     new_words = []
@@ -71,7 +123,7 @@ def score_guess(guess, possible_answers, possible_feedback):
 
     if valid_feedback == 0:
         return guess, 0
-    
+
     return guess, total_score/valid_feedback
 
 def parallel_score_guesses(guesses, possible_answers, possible_feedback):
@@ -89,21 +141,22 @@ def parallel_score_guesses(guesses, possible_answers, possible_feedback):
 
     return dict(scores)
 
-
-
 def generate_all_wordle_feedback():
     # Define the possible feedback options
     feedback_options = ['G', 'Y', '?']  # Green, Yellow, Gray
-    
+
     # Generate all possible combinations of feedback for a 5-letter word
     all_feedback = list(product(feedback_options, repeat=5))
-    
+
     # Convert each combination to a string
     all_feedback_strings = [''.join(feedback) for feedback in all_feedback]
-    
+
     return all_feedback_strings
 
 def main():
+
+    # Fetch the previous guesses from the Wordle website
+    previous_answers = fetch_previous_answers()
 
     possible_feedback = generate_all_wordle_feedback()
     #output all possible feedback count
@@ -111,12 +164,17 @@ def main():
 
     guesses = GUESSES.copy()
     possible_words = ANSWERS.copy()
-    
+
+    # remove previous answers from possible words
+    for answer in previous_answers:
+        if answer in possible_words:
+            possible_words.remove(answer)
+
     for attempt in range(1, 7):
         if not possible_words:
             print("No valid words remaining. Something went wrong.")
             return
-        
+
         # score all guesses
         scores = parallel_score_guesses(guesses, possible_words, possible_feedback)
 
@@ -127,7 +185,7 @@ def main():
         print("Top 10 guesses:")
         for i, guess in enumerate(guesses[:10]):
             print(f"{i + 1}. {guess} - {scores[guess]}")
-        
+
         print(f"\nAttempt {attempt}")
 
         print(f"Remaining possible words: {len(possible_words)}")
@@ -138,18 +196,18 @@ def main():
             for word in possible_words:
                 print(f"{word} - {scores[word]}")
 
-        
+
         # guess the lowest score
         guess = input("Enter guess: ")
 
         feedback = input("Enter feedback (G for Green, Y for Yellow, ? for Gray): ").upper()
-        
+
         if feedback == "GGGGG":
             print(f"Solved in {attempt} attempts!")
             return
-        
+
         possible_words = filter_words(possible_words, guess, feedback)
-    
+
     print("Failed to solve in 6 attempts.")
 
 if __name__ == '__main__':
