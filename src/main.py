@@ -196,9 +196,15 @@ def main():
             for word in possible_words:
                 print(f"{word} - {scores[word]}")
 
+        while True:
+            # allow user to enter guess
+            guess = input("Enter guess: ")
 
-        # guess the lowest score
-        guess = input("Enter guess: ")
+            # check if the guess is valid
+            if guess not in GUESSES:
+                print("Invalid guess. Please try again.")
+            else:
+                break
 
         feedback = input("Enter feedback (G for Green, Y for Yellow, ? for Gray): ").upper()
 
