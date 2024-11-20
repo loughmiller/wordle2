@@ -1,0 +1,9 @@
+CREATE DATABASE wordle;
+
+USE wordle;
+
+CREATE TABLE words (
+    word_id SMALLINT AUTO_INCREMENT PRIMARY KEY,
+    word VARCHAR(5) NOT NULL,
+    answer BOOLEAN NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
