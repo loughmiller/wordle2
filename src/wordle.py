@@ -46,7 +46,7 @@ def fetch_previous_answers():
     while current_date < end_date:
         # print fetch date
         print(f"Fetching data for {current_date.strftime('%Y-%m-%d')}")
-        previous_answers += [fetch_previous_answer(current_date)]
+        previous_answers += [fetch_answer(current_date)]
         current_date += timedelta(days=1)
 
     with open('previous_answers.json', 'w') as json_file:
@@ -61,7 +61,8 @@ def fetch_previous_answers():
 
     return answers
 
-def fetch_previous_answer(date):
+# API result example: {'id': 2326, 'solution': 'primp', 'print_date': '2024-11-13', 'days_since_launch': 1243, 'editor': 'Tracy Bennett'}
+def fetch_answer(date):
     url = f"https://www.nytimes.com/svc/wordle/v2/{date.strftime('%Y-%m-%d')}.json"
     response = requests.get(url)
     if response.status_code == 200:
@@ -158,12 +159,23 @@ def main():
     # Fetch the previous guesses from the Wordle website
     previous_answers = fetch_previous_answers()
 
+    # Fetch today's answer in case they add a new word!
+    today_answer = fetch_answer(datetime.now())
+
+    #print today's answer
+    # print(today_answer['solution'])
+
     possible_feedback = generate_all_wordle_feedback()
     #output all possible feedback count
     # print(len(possible_feedback))
 
     guesses = GUESSES.copy()
     possible_words = ANSWERS.copy()
+
+    # if today's answer is not in the possible words, add it
+    if today_answer['solution'] not in possible_words:
+        print("A word was added!")
+        possible_words.append(today_answer['solution'])
 
     # remove previous answers from possible words
     for answer in previous_answers:
