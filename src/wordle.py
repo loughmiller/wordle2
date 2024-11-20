@@ -187,11 +187,17 @@ def main():
             print("No valid words remaining. Something went wrong.")
             return
 
+        # timer for scoring and sorting
+        start_time = datetime.now()
+
         # score all guesses
         scores = parallel_score_guesses(guesses, possible_words, possible_feedback)
 
         # sort guesses by score
         guesses.sort(key=lambda guess: scores[guess])
+
+        # print time taken
+        print(f"Timer: {datetime.now() - start_time}")
 
         # print top 10 guesses
         print("Top 10 guesses:")
