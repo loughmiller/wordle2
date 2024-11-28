@@ -210,6 +210,9 @@ def main():
 
         # if the number of possible words is less than 11, print them with scores using scores dictionary
         if len(possible_words) < 11:
+            #sort the possible words by score
+            possible_words.sort(key=lambda word: scores[word])
+
             print("Remaining possible words:")
             for word in possible_words:
                 print(f"{word} - {scores[word]}")
