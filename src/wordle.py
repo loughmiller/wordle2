@@ -208,14 +208,14 @@ def main():
 
         print(f"Remaining possible words: {len(possible_words)}")
 
-        # if the number of possible words is less than 11, print them with scores using scores dictionary
-        if len(possible_words) < 11:
-            #sort the possible words by score
-            possible_words.sort(key=lambda word: scores[word])
+        # display the top 10 remaining possible words
 
-            print("Remaining possible words:")
-            for word in possible_words:
-                print(f"{word} - {scores[word]}")
+        possible_words.sort(key=lambda word: scores[word])
+
+        print("Remaining possible words:")
+        for i, word in enumerate(possible_words[:10]):
+            print(f"{i + 1}. {word} - {scores[word]}")
+
 
         while True:
             # allow user to enter guess
