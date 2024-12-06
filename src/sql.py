@@ -1,28 +1,15 @@
 from datetime import datetime, timedelta
 import json
 import multiprocessing
+import mysql.connector
 import random
 import requests
 from functools import partial
 from itertools import product
 
-# Assuming your JSON data is stored in a file named 'words.json'
-with open('wordleDictionary.json', 'r') as file:
-    GUESSES = json.load(file)
-
-# print the first 10 words to make sure the file was loaded correctly
-# print(len(GUESSES))
-
-# possible answers only appear in GUESSES after the work zymic
-# slice the array after the word zymic
-ANSWERS = GUESSES[GUESSES.index('zymic') + 1:]
-
-# print(len(ANSWERS))
-
-# use smaller dataset for testing
-# GUESSES = ANSWERS
-# ANSWERS = GUESSES
-# print(len(GUESSES))
+def load_secrets():
+    with open('secrets.json') as f:
+        return json.load(f)
 
 def fetch_previous_answers():
     start_date = datetime(2021, 6, 19)
@@ -74,39 +61,63 @@ def load_previous_answers():
     with open('previous_answers.json', 'r') as file:
         return json.load(file)
 
-def filter_words(words, guess, feedback):
-    new_words = []
-    for word in words:
-        if len(word) != len(guess):
-            continue
+def generate_join_sql(guess, feedback):
+    if len(guess) != 5 or len(feedback) != 5:
+        raise ValueError("Guess and feedback must both be 5 characters long")
 
-        # Count the occurrences of each letter in the word
-        word_letter_count = {}
-        for letter in word:
-            word_letter_count[letter] = word_letter_count.get(letter, 0) + 1
+    if not all(c in 'gy?' for c in feedback):
+        raise ValueError("Feedback must only contain 'g', 'y', or '?'")
 
-        # Check if the word matches the feedback
-        match = True
-        for i, (g, f) in enumerate(zip(guess, feedback)):
-            if f == 'G' and word[i] != g:
-                match = False
-                break
-            elif f == 'Y':
-                if g not in word or word[i] == g:
-                    match = False
-                    break
-                word_letter_count[g] -= 1
-            elif f == '?' and g in word:
-                # Check if all occurrences of this letter are accounted for
-                remaining = sum(1 for j, letter in enumerate(word) if letter == g and feedback[j] in 'GY')
-                if word_letter_count[g] > remaining:
-                    match = False
-                    break
+    tables = []
+    remove_double_letters = set()
 
-        if match:
-            new_words.append(word)
+    for i, (letter, fb) in enumerate(zip(guess.upper(), feedback.lower()), start=1):
+        if fb == 'g':
+            tables.append(f"{letter}g{i} using (word_id)\n")
+        elif fb == 'y':
+            tables.append(f"{letter}y{i} using (word_id)\n")
+            # if this is the second occurrence of the letter, join with the double letter table unless it's already been joined
+            if guess[:i-1].count(letter) > 0 and f"{letter.upper()}{letter.upper()} using (word_id)\n" not in tables:
+                tables.append(f"{letter.upper()}{letter.upper()} using (word_id)\n")
+        elif fb == '?':
+            # if this is the second occurrence of the letter, save the letter for double letter removal
+            if guess[:i-1].count(letter) > 0:
+                remove_double_letters.add(letter)
+            else:
+                tables.append(f"{letter.upper()}q using (word_id)\n")
+        else:
+            raise ValueError(f"Invalid feedback character: {fb}")
 
-    return new_words
+
+    join_clause = " INNER JOIN ".join(tables)
+
+    sql = f"""SELECT count(*) FROM possible_answers w INNER JOIN {join_clause}"""
+
+    if remove_double_letters:
+        sql += "\n"
+        double_letter_sql = []
+        for letter in remove_double_letters:
+            double_letter_sql.append(f"NOT EXISTS (SELECT 1 FROM {letter.upper()}{letter.upper()} d WHERE d.word_id = w.word_id)\n")
+
+        sql += "WHERE " + " AND ".join(double_letter_sql)
+
+    return sql + ";"
+
+def sql_score_guess(guess, possible_feedback, cursor):
+    total = 0
+    valid = 0
+    for feedback in possible_feedback:
+        # print(feedback)
+        sql = generate_join_sql(guess, feedback)
+        # if print_sql:
+        #     print(sql)
+        cursor.execute(sql)
+        count = cursor.fetchone()[0]
+        if count > 0:
+            valid += 1
+            total += (count * count)
+
+    return guess, total/valid
 
 def score_guess(guess, possible_answers, possible_feedback):
     # print(guess, len(possible_answers), len(possible_feedback))
@@ -126,12 +137,14 @@ def score_guess(guess, possible_answers, possible_feedback):
 
     return guess, total_score
 
-def parallel_score_guesses(guesses, possible_answers, possible_feedback):
+
+
+def parallel_score_guesses(guesses, possible_feedback, cursor):
     # Determine the number of CPU cores to use
     num_cores = multiprocessing.cpu_count()
 
     # Create a partial function to pass the fixed arguments to the scoring function
-    partial_score = partial(score_guess, possible_answers=possible_answers, possible_feedback=possible_feedback)
+    partial_score = partial(sql_score_guess, possible_feedback=possible_feedback, cursor=cursor)
 
     # Create a pool of workers to score the guesses in parallel
     with multiprocessing.Pool(num_cores) as pool:
@@ -143,7 +156,7 @@ def parallel_score_guesses(guesses, possible_answers, possible_feedback):
 
 def generate_all_wordle_feedback():
     # Define the possible feedback options
-    feedback_options = ['G', 'Y', '?']  # Green, Yellow, Gray
+    feedback_options = ['g', 'y', '?']  # Green, Yellow, Gray
 
     # Generate all possible combinations of feedback for a 5-letter word
     all_feedback = list(product(feedback_options, repeat=5))
@@ -153,68 +166,118 @@ def generate_all_wordle_feedback():
 
     return all_feedback_strings
 
+#
+# START HERE
+#
 def main():
 
+    # Load secrets
+    secrets = load_secrets()
+
+    # connect to mysql database
+    db = mysql.connector.connect(
+        host='localhost',
+        user='root',
+        password=secrets['mysql']['password'],
+        database='wordle',
+        auth_plugin='mysql_native_password'
+    )
+
+    cursor = db.cursor()
+
     # Fetch the previous guesses from the Wordle website
-    previous_answers = [] #fetch_previous_answers()
+    # previous_answers = [] #fetch_previous_answers()
+
+    # Load the possible answers into a temporary table from the words table
+    cursor.execute("CREATE TEMPORARY TABLE possible_answers AS SELECT word_id FROM words where answer = 1")
+
+    # add indexes to the possible_answers table
+    cursor.execute("CREATE INDEX word_id_index ON possible_answers (word_id)")
+
+    # print number of possible answers
+    cursor.execute("SELECT count(*) FROM possible_answers")
+    print(cursor.fetchone()[0])
 
     possible_feedback = generate_all_wordle_feedback()
     #output all possible feedback count
     # print(len(possible_feedback))
 
-    guesses = GUESSES.copy()
-    possible_words = ANSWERS.copy()
+    sql_score_guess("AAPAS", possible_feedback, True)
 
-    # remove previous answers from possible words
-    for answer in previous_answers:
-        if answer in possible_words:
-            possible_words.remove(answer)
+    # score all words from the words table
+    cursor.execute("SELECT word FROM words")
+    words = cursor.fetchall()
+    guesses = [word[0] for word in words]
+    # for word in words:
+    #     print(word[0])
+    #     print(sql_score_guess(word[0], possible_feedback))
 
-    for attempt in range(1, 7):
-        if not possible_words:
-            print("No valid words remaining. Something went wrong.")
-            return
+    # timer for scoring and sorting
+    start_time = datetime.now()
 
-        # score all guesses
-        scores = parallel_score_guesses(guesses, possible_words, possible_feedback)
+    # score all guesses
+    scores = parallel_score_guesses(guesses, possible_feedback, cursor)
 
-        # sort guesses by score
-        guesses.sort(key=lambda guess: scores[guess])
+    # sort guesses by score
+    guesses.sort(key=lambda guess: scores[guess])
 
-        # print top 10 guesses
-        print("Top 10 guesses:")
-        for i, guess in enumerate(guesses[:10]):
-            print(f"{i + 1}. {guess} - {scores[guess]}")
+    # print time taken
+    print(f"Timer: {datetime.now() - start_time}")
 
-        print(f"\nAttempt {attempt}")
+    # print top 10 guesses
+    print("Top 10 guesses:")
+    for i, guess in enumerate(guesses[:10]):
+        print(f"{i + 1}. {guess} - {scores[guess]}")
 
-        print(f"Remaining possible words: {len(possible_words)}")
+    # for attempt in range(1, 7):
+    #     if not possible_words:
+    #         print("No valid words remaining. Something went wrong.")
+    #         return
 
-        # if the number of possible words is less than 11, print them with scores using scores dictionary
-        if len(possible_words) < 11:
-            print("Remaining possible words:")
-            for word in possible_words:
-                print(f"{word} - {scores[word]}")
+    #     # score all guesses
+    #     scores = parallel_score_guesses(guesses, possible_words, possible_feedback)
 
-        while True:
-            # allow user to enter guess
-            guess = input("Enter guess: ")
+    #     # sort guesses by score
+    #     guesses.sort(key=lambda guess: scores[guess])
 
-            # check if the guess is valid
-            if guess not in GUESSES:
-                print("Invalid guess. Please try again.")
-            else:
-                break
+    #     # print top 10 guesses
+    #     print("Top 10 guesses:")
+    #     for i, guess in enumerate(guesses[:10]):
+    #         print(f"{i + 1}. {guess} - {scores[guess]}")
 
-        feedback = input("Enter feedback (G for Green, Y for Yellow, ? for Gray): ").upper()
+    #     print(f"\nAttempt {attempt}")
 
-        if feedback == "GGGGG":
-            print(f"Solved in {attempt} attempts!")
-            return
+    #     print(f"Remaining possible words: {len(possible_words)}")
 
-        possible_words = filter_words(possible_words, guess, feedback)
+    #     # if the number of possible words is less than 11, print them with scores using scores dictionary
+    #     if len(possible_words) < 11:
+    #         print("Remaining possible words:")
+    #         for word in possible_words:
+    #             print(f"{word} - {scores[word]}")
 
-    print("Failed to solve in 6 attempts.")
+    #     while True:
+    #         # allow user to enter guess
+    #         guess = input("Enter guess: ")
+
+    #         # check if the guess is valid
+    #         if guess not in GUESSES:
+    #             print("Invalid guess. Please try again.")
+    #         else:
+    #             break
+
+    #     feedback = input("Enter feedback (G for Green, Y for Yellow, ? for Gray): ").upper()
+
+    #     if feedback == "GGGGG":
+    #         print(f"Solved in {attempt} attempts!")
+    #         return
+
+    #     possible_words = filter_words(possible_words, guess, feedback)
+
+    # print("Failed to solve in 6 attempts.")
+
+    # Close the MySQL connection
+    cursor.close()
+    db.close()
 
 if __name__ == '__main__':
     # Uncomment the next line if using PyInstaller or similar
