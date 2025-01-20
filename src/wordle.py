@@ -7,7 +7,7 @@ from functools import partial
 from itertools import product
 
 # Assuming your JSON data is stored in a file named 'words.json'
-with open('wordleDictionary.json', 'r') as file:
+with open('/Users/loughmsa/src/wordle2/wordleDictionary.json', 'r') as file:
     GUESSES = json.load(file)
 
 # print the first 10 words to make sure the file was loaded correctly
@@ -72,7 +72,7 @@ def fetch_answer(date):
         return None
 
 def load_previous_answers():
-    with open('previous_answers.json', 'r') as file:
+    with open('/Users/loughmsa/src/wordle2/previous_answers.json', 'r') as file:
         return json.load(file)
 
 def filter_words(words, guess, feedback):
@@ -99,7 +99,17 @@ def filter_words(words, guess, feedback):
                 word_letter_count[g] -= 1
             elif f == '?' and g in word:
                 # Check if all occurrences of this letter are accounted for
-                remaining = sum(1 for j, letter in enumerate(word) if letter == g and feedback[j] in 'GY')
+                remaining = 0
+
+                # Loop through each index and letter in the word
+                for j, letter in enumerate(guess):
+                    # Check if the letter matches 'g'
+                    if letter == g:
+                        # Check if the corresponding feedback is 'G' or 'Y'
+                        fb = feedback[j]
+                        if fb in 'GY':
+                            # Increment the counter if both conditions are satisfied
+                            remaining += 1
                 if word_letter_count[g] > remaining:
                     match = False
                     break
@@ -170,6 +180,7 @@ def main():
     # print(len(possible_feedback))
 
     guesses = GUESSES.copy()
+    # possible_words = ["bloat"] #ANSWERS.copy()
     possible_words = ANSWERS.copy()
 
     # if today's answer is not in the possible words, add it
