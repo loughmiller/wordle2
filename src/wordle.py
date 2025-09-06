@@ -5,6 +5,7 @@ import random
 import requests
 from functools import partial
 from itertools import product
+import prettytable
 
 # Assuming your JSON data is stored in a file named 'words.json'
 with open('/Users/loughmsa/src/wordle2/wordleDictionary.json', 'r') as file:
@@ -212,10 +213,14 @@ def main():
 
         # print top 10 guesses
         print("Top 10 guesses:")
+        table1  = prettytable.PrettyTable()
         for i, guess in enumerate(guesses[:10]):
-            print(f"{i + 1}. {guess} - {scores[guess]}")
+            # print(f"{i + 1}. {guess} - {scores[guess]}")
+            # print the guess in a table
+            table1.field_names = ["Guess", "Score"]
+            table1.add_row([guess, round(scores[guess], 2)])
 
-        print(f"\nAttempt {attempt}")
+        print(table1)
 
         print(f"Remaining possible words: {len(possible_words)}")
 
@@ -224,8 +229,12 @@ def main():
         possible_words.sort(key=lambda word: scores[word])
 
         print("Remaining possible words:")
+        table2 = prettytable.PrettyTable()
         for i, word in enumerate(possible_words[:10]):
-            print(f"{i + 1}. {word} - {scores[word]}")
+            table2.field_names = ["Word", "Score"]
+            table2.add_row([word, round(scores[word], 2)])
+
+        print(table2)
 
 
         while True:
